@@ -1,0 +1,71 @@
+---
+- name: Install GitLab CE
+  hosts: all
+  become: yes
+  vars:
+    hostname: gitlab.example.com
+  tasks:
+  - name: install dependencies
+    apt:
+      name:
+        - curl
+        - ca-certificates
+        - gnupg2
+        - software-properties-common
+      state: present
+
+  - name: add GitLab CE repository key
+    apt_key:
+      url: https://packages.gitlab.com/gpg.key
+      state: present
+
+  - name: add GitLab CE repository
+    apt_repository:
+      repo: deb https://packages.gitlab.com/gitlab/gitlab-ce/ubuntu/ {{ ansible_distribution_release }} main
+      state: present
+
+  - name: install GitLab CE
+    apt:
+      name: gitlab-ce
+      state: present
+
+  - name: configure GitLab CE hostname
+    lineinfile:
+      dest: /etc/gitlab/gitlab.rb
+      line: external_url "https://{{ hostname }}"
+      state: present
+
+  - name: copy SSL certificate
+    copy:
+      src: cert.pem
+      dest: /etc/gitlab/ssl/cert.pem
+      mode: 0600
+      owner: root
+      group: root
+
+  - name: copy SSL key
+    copy:
+      src: key.pem
+      dest: /etc/gitlab/ssl/key.pem
+      mode: 0600
+      owner: root
+      group: root
+
+  - name: configure GitLab CE to use SSL
+    lineinfile:
+      dest: /etc/gitlab/gitlab.rb
+      line: nginx['redirect_http_to_https'] = true
+      state: present
+
+  - name: configure GitLab CE memory limit
+    lineinfile:
+      dest: /etc/gitlab/gitlab.rb
+      line: gitlab_rails['gitlab_rails_gitlab_worker_memory_limit'] = 2048
+      state: present
+
+  - name: reconfigure and restart GitLab CE
+    shell: |
+      gitlab-ctl reconfigure
+      gitlab-ctl restart
+    args:
+      executable: /bin/bash
