@@ -6,7 +6,7 @@
   - name: install dependencies
     apt:
       name:
-        - openjdk-8-jdk
+        - openjdk-11-jdk
         - apt-transport-https
         - ca-certificates
         - curl
