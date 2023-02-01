@@ -1,75 +1,62 @@
-- name: Install Nexus OSS and Nginx
+- name: Install Nexus OSS with Nginx HTTPS and remote source for SSL certificates
   hosts: all
-  become: yes
+  gather_facts: yes
   vars:
-    nexus_hostname: nexus.example.com
-    ssl_certificate_path: /path/to/cert.pem
-    ssl_certificate_key_path: /path/to/cert.key
+    nexus_version: latest
+    nexus_edition: oss
+    nexus_repo: https://download.sonatype.com/nexus/oss
+    nexus_download_url: "{{ nexus_repo }}/nexus-{{ nexus_version }}-{{ nexus_edition }}-unix.tar.gz"
+    nexus_install_dir: /opt/nexus
+    ssl_certificate_path: /path/to/ssl/certificate
+    ssl_certificate_key_path: /path/to/ssl/certificate_key
+    nexus_hostname: example.com
+  
   tasks:
-  - name: Install Java
-    apt:
-      name: openjdk-8-jdk
+    - name: Install required packages
+      become: yes
+      package:
+        name:
+          - openjdk-8-jdk
+          - nginx
       state: present
-
-  - name: Add Nexus Repository
-    apt_repository:
-      repo: deb https://oss.sonatype.org/content/repositories/releases/
-      state: present
-
-  - name: Install Nexus OSS
-    apt:
-      name: nexus-oss
-      state: present
-
-  - name: Start Nexus OSS service
-    service:
-      name: nexus
-      state: started
-      enabled: yes
-
-  - name: Install Nginx
-    apt:
-      name: nginx
-      state: present
-
-  - name: Create nginx.conf.j2 file
-    copy:
-      content: |
-        server {
-          listen 80;
-          server_name {{ nexus_hostname }};
-          return 301 https://$host$request_uri;
-        }
-
-        server {
-          listen 443 ssl;
-          server_name {{ nexus_hostname }};
-          client_max_body_size 5G;
-
-          ssl_certificate {{ ssl_certificate_path }};
-          ssl_certificate_key {{ ssl_certificate_key_path }};
-
-          location / {
-            proxy_pass http://localhost:8081/;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-          }
-        }
-      dest: "{{ playbook_dir }}/nginx.conf.j2"
-
-  - name: Copy Nginx Configuration
-    template:
-      src: nginx.conf.j2
-      dest: /etc/nginx/sites-available/nexus.conf
-      owner: root
-      group: root
-      mode: 0644
-    vars:
-      nexus_hostname: "{{ nexus_hostname }}"
-      ssl_certificate_path: "{{ ssl_certificate_path }}"
-      ssl_certificate_key_path: "{{ ssl_certificate_key_path }}"
-
-  - name: Reload Nginx
-    service:
-      name: nginx
-      state: reloaded
+      
+    - name: Download Nexus OSS
+      become: yes
+      get_url:
+        url: "{{ nexus_download_url }}"
+        dest: /tmp/nexus.tar.gz
+        
+    - name: Extract Nexus OSS
+      become: yes
+      command: tar xzf /tmp/nexus.tar.gz -C /opt
+      args:
+        creates: "{{ nexus_install_dir }}/nexus-{{ nexus_version }}-{{ nexus_edition }}"
+        
+    - name: Copy SSL certificates from remote source
+      become: yes
+      copy:
+        src: "{{ item }}"
+        dest: "/path/to/destination"
+      with_items:
+        - "{{ ssl_certificate_path }}"
+        - "{{ ssl_certificate_key_path }}"
+        
+    - name: Configure Nginx
+      become: yes
+      template:
+        src: templates/nginx.conf.j2
+        dest: /etc/nginx/sites-available/default
+      vars:
+        nexus_hostname: "{{ nexus_hostname }}"
+        ssl_certificate_path: "{{ ssl_certificate_path }}"
+        ssl_certificate_key_path: "{{ ssl_certificate_key_path }}"
+        
+    - name: Start Nexus
+      become: yes
+      command: "{{ nexus_install_dir }}/nexus-{{ nexus_version }}-{{ nexus_edition }}/bin/nexus start"
+      
+    - name: Start Nginx
+      become: yes
+      service:
+        name: nginx
+        state: started

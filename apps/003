@@ -1,0 +1,89 @@
+---
+- name: Install and start Vault on 192.168.1.11 with SSL and Nginx
+  hosts: 192.168.1.11
+  become: yes
+  tasks:
+    - name: Update and upgrade system
+      apt:
+        update_cache: yes
+        upgrade: yes
+
+    - name: Install unzip and nginx
+      apt:
+        name: ['unzip', 'nginx']
+        state: present
+
+    - name: Download and extract Vault binary
+      unarchive:
+        src: https://releases.hashicorp.com/vault/1.12.2/vault_1.12.2_linux_amd64.zip
+        dest: /usr/local/bin/
+        remote_src: yes
+        creates: /usr/local/bin/vault
+
+    - name: Create Vault configuration file
+      copy:
+        src: vault.hcl
+        dest: /etc/vault.hcl
+        owner: root
+        group: root
+        mode: 0644
+      content: |
+        listener "tcp" {
+          address = "0.0.0.0:8200"
+          tls_cert_file = "/etc/ssl/certs/vault.crt"
+          tls_key_file = "/etc/ssl/private/vault.key"
+        }
+
+    - name: Copy SSL certificate
+      copy:
+        src: vault.crt
+        dest: /etc/ssl/certs/vault.crt
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Copy SSL private key
+      copy:
+        src: vault.key
+        dest: /etc/ssl/private/vault.key
+        owner: root
+        group: root
+        mode: 0600
+
+    - name: Start Vault service
+      service:
+        name: vault
+        state: started
+        enabled: yes
+      become: yes
+      become_user: root
+
+    - name: Create Nginx configuration file
+      copy:
+        src: nginx.conf
+        dest: /etc/nginx/sites-available/vault.lazarev.gq
+        owner: root
+        group: root
+        mode: 0644
+      content: |
+        server {
+            listen 80;
+            server_name vault.lazarev.gq;
+            return 301 https://$host$request_uri;
+        }
+        server {
+            listen 443 ssl;
+            server_name vault.lazarev.gq;
+            ssl_certificate /etc/ssl/certs/vault.crt;
+            ssl_certificate_key /etc/ssl/private/vault.key;
+            location / {
+                proxy_pass http://127.0.0.1:8200;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+            }
+        }
+
+    - name: Create symlink for Nginx configuration file
+      file:
+        src: /etc/nginx/sites-available/vault.lazarev.gq
+        dest: /etc
