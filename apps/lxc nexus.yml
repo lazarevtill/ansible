@@ -1,0 +1,86 @@
+- name: Create LXC container with Nexus
+  proxmox:
+    api_user: "{{ proxmox_api_user }}"
+    api_password: "{{ proxmox_api_password }}"
+    api_host: "{{ proxmox_api_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ vmid }}"
+    ostemplate: "{{ ostemplate }}"
+    storage: "{{ storage }}"
+    password: "{{ password }}"
+    memory: 2048
+    swap: 2048
+    hostname: "{{ hostname }}"
+    net0: "name=eth0,bridge=vmbr0,ip={{ ip }}/24,gw={{ gateway }}"
+  register: container_created
+
+- name: Start LXC container
+  proxmox:
+    api_user: "{{ proxmox_api_user }}"
+    api_password: "{{ proxmox_api_password }}"
+    api_host: "{{ proxmox_api_host }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ vmid }}"
+    state: started
+  when: container_created is changed
+
+- name: Wait for container to start
+  wait_for:
+    host: "{{ ip }}"
+    port: 22
+    state: started
+    delay: 30
+    timeout: 600
+
+- name: Install necessary packages
+  become: yes
+  become_user: root
+  apt:
+    name: "{{ packages }}"
+    update_cache: yes
+
+- name: Download Nexus OSS
+  become: yes
+  become_user: root
+  unarchive:
+    src: "https://download.sonatype.com/nexus/3/nexus/3/nexus-3.46.0-01-unix.tar.gz"
+    dest: /opt/
+    remote_src: yes
+
+- name: Install Nexus OSS
+  become: yes
+  become_user: root
+  command: sh /opt/nexus-3.46.0-01-unix/bin/nexus install
+
+- name: Start Nexus OSS
+  become: yes
+  become_user: root
+  command: sh /opt/nexus-{{ nexus_version }}-{{ nexus_edition }}-unix/bin/nexus start
+
+- name: Install Nginx
+  become: yes
+  become_user: root
+  apt:
+    name: "nginx"
+    update_cache: yes
+
+- name: Create Nginx configuration file
+  copy:
+    content: |
+      server {
+        listen 80;
+        server_name {{ nexus_hostname }};
+        return 301 https://$host$request_uri;
+      }
+
+      server {
+        listen 443 ssl;
+        server_name {{ nexus_hostname }};
+        client_max_body_size 5G;
+
+        ssl_certificate {{ ssl_certificate_path }};
+        ssl_certificate_key {{ ssl_certificate_key_path }};
+
+        location / {
+          proxy_pass http://localhost:8081/;
+          proxy_set
