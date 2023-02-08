@@ -1,0 +1,40 @@
+---
+- name: Set up OpenLDAP
+  hosts: ldap
+  become: yes
+  vars:
+    ldap_base_dn: "dc=lazarev,dc=gq"
+    ldap_admin_dn: "cn=admin,{{ ldap_base_dn }}"
+    ldap_admin_password: "secret"
+  tasks:
+    - name: Update the system
+      apt:
+        update_cache: yes
+
+    - name: Install OpenLDAP
+      apt:
+        name: slapd
+        state: present
+
+    - name: Set up OpenLDAP configuration
+      shell: |
+        dpkg-reconfigure slapd <<EOF
+        {{ ldap_base_dn }}
+        {{ ldap_admin_dn }}
+        {{ ldap_admin_password }}
+        {{ ldap_admin_password }}
+        No
+        No
+        EOF
+      when: ldap_base_dn is defined
+
+    - name: Populate OpenLDAP directory with initial data
+      copy:
+        src: files/base.ldif
+        dest: /tmp/base.ldif
+      when: ldap_base_dn is defined
+
+    - name: Import base data
+      shell: |
+        ldapadd -x -D {{ ldap_admin_dn }} -w {{ ldap_admin_password }} -f /tmp/base.ldif
+      when: ldap_base_dn is defined
